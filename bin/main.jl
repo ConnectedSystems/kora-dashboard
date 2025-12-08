@@ -1,4 +1,3 @@
-using MbedTLS
 using DotEnv
 
 DotEnv.load!()
@@ -24,19 +23,10 @@ port = parse(Int, get(ENV, "PORT", "8080"))
 # Run the dashboard
 app = create_dashboard()
 
-ssl_path = get(ENV, "SSLPATH", "")
-if !isempty(ssl_path)
-    sslconfig = MbedTLS.SSLConfig(
-        "$(ssl_path)/fullchain.pem",
-        "$(ssl_path)/privkey.pem"
-    )
-else
-    sslconfig = nothing
-end
-
-server = Bonito.Server(app, url, port; proxy_url=proxy, sslconfig=sslconfig)
-Bonito.Page(; listen_port=port)
+server = Bonito.Server(app, url, port; proxy_url=proxy)
+Bonito.Page(; listen_port=port, proxy_url=proxy)
 route!(server, "/" => app)
+# route!(server, "/coralflow/" => app)
 
 # Display URL
 url_to_visit = online_url(server, "/")
