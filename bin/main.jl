@@ -4,7 +4,11 @@ DotEnv.load!()
 
 include(joinpath(@__DIR__, "..", "src", "main.jl"))
 
-url = get(ENV, "JULIAHUB_APP_URL", "0.0.0.0")
+url = get(ENV, "JULIAHUB_APP_URL", "")
+if isempty(url)
+    url = get(ENV, "IP", "0.0.0.0")
+end
+
 proxy = get(ENV, "PROXY", "")
 if isempty(proxy)
     @info "No Bonito proxy found in environment variable JULIAHUB_APP_URL"
@@ -19,9 +23,19 @@ port = parse(Int, get(ENV, "PORT", "8080"))
 # Run the dashboard
 app = create_dashboard()
 
-server = Bonito.Server(app, url, port; proxy_url=proxy)
+ssl_path = get(ENV, "SSLPATH", "")
+if !isempty(ssl_path)
+    sslconfig = MbedTLS.SSLConfig(
+        "$(ssl_path)/fullchain.pem",
+        "$(ssl_path)/privkey.pem"
+    )
+else
+    sslconfig = nothing
+end
+
+server = Bonito.Server(app, url, port; proxy_url=proxy, sslconfig=sslconfig)
 Bonito.Page(; listen_port=port)
-route!(server, "/coralflow" => app)
+route!(server, "/" => app)
 
 # Display URL
 url_to_visit = online_url(server, "/")
