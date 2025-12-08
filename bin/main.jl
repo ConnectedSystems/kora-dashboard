@@ -24,9 +24,7 @@ port = parse(Int, get(ENV, "PORT", "8080"))
 app = create_dashboard()
 
 server = Bonito.Server(app, url, port; proxy_url=proxy)
-Bonito.Page(; listen_port=port, proxy_url=proxy)
 route!(server, "/" => app)
-# route!(server, "/coralflow/" => app)
 
 # Display URL
 url_to_visit = online_url(server, "/")
