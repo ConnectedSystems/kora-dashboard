@@ -1,0 +1,80 @@
+/* Dashboard Main Layout */
+.dashboard-container {
+    display: flex;
+    flex-direction: row;
+    min-height: 100vh;
+    font-family: Arial, sans-serif;
+    background-color: #fafafa;
+}
+
+/* Left Column - Controls */
+.controls-panel {
+    width: 350px;
+    padding: 30px;
+    background-color: #ffffff;
+    border-right: 2px solid #e0e0e0;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+    overflow-y: auto;
+}
+
+.controls-title {
+    margin-bottom: 30px;
+    color: #2c3e50;
+    font-size: 24px;
+    border-bottom: 3px solid #3498db;
+    padding-bottom: 10px;
+}
+
+/* Control Groups */
+.control-group {
+    margin-bottom: 25px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+}
+
+.control-group.tabular {
+    border-left: 4px solid #e74c3c;
+}
+
+.control-group.corymbose {
+    border-left: 4px solid #f39c12;
+}
+
+.control-group.massive {
+    border-left: 4px solid #27ae60;
+}
+
+.control-group.deployment-time {
+    border-left: 4px solid #9b59b6;
+    margin-bottom: 0; /* Last item doesn't need bottom margin */
+}
+
+.control-label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: bold;
+    color: #34495e;
+    font-size: 14px;
+}
+
+.slider-container {
+    margin-bottom: 8px;
+}
+
+/* Right Column - Plots */
+.plots-panel {
+    flex: 1;
+    padding: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #fafafa;
+}
+
+.plots-container {
+    background-color: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    padding: 20px;
+}
