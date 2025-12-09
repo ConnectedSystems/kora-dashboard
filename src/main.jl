@@ -63,7 +63,7 @@ function create_dashboard()
     styling = Bonito.Asset(joinpath(@__DIR__, "..", "assets", "db_display.css"))
 
     # Create the app
-    app = App() do
+    app = App(; title="CoralFlow") do
         # Model parameters
         n_years = 75
         n_locs = 1
