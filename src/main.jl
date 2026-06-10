@@ -14,7 +14,7 @@ const DATA_DIR = joinpath(@__DIR__, "..", "data")
 const ECORRAP_FILE = joinpath(DATA_DIR, "ecorrap_expanded.parquet")
 const FG_FILE = joinpath(DATA_DIR, "ecorrap_to_cscape_species.csv")
 const OUTPUT_DIR = joinpath(DATA_DIR, "models")
-const RUNS_PER_CLICK = 50
+const RUNS_PER_CLICK = 25
 const BASE_SEED = 148
 
 # Process EcoRRAP data to create models
