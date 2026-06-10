@@ -58,7 +58,7 @@ function color_for_click(click::Int)
     return palette[mod1(click, length(palette))]
 end
 
-function simulate_outputs(reef_state, env_conditions, dt, tv, cv, mv, n_runs)
+function simulate_outputs(reef_state, env_conditions, dt, revisit_cadence, deploy_volumes, n_runs)
     covers = Vector{Union{Nothing,Vector{Float32}}}(undef, n_runs)
     group_covers = Vector{Union{Nothing,Matrix{Float32}}}(undef, n_runs)
 
@@ -80,9 +80,14 @@ function simulate_outputs(reef_state, env_conditions, dt, tv, cv, mv, n_runs)
 
             # Configure deployments based on slider values
             local_reef_state.deployment_times .= 0  # reset deployment tracker
-            local_reef_state.deployment_times[dt:end, :, 1] .= tv  # Tabular Acropora
-            local_reef_state.deployment_times[dt:end, :, 2] .= cv  # Corymbose Acropora
-            local_reef_state.deployment_times[dt:end, :, 4] .= mv  # Small massives
+            cadence = max(1, revisit_cadence)
+            n_grps = min(length(deploy_volumes), size(local_reef_state.deployment_times, 3))
+            for grp in 1:n_grps
+                vol = deploy_volumes[grp]
+                if vol > 0
+                    local_reef_state.deployment_times[dt:cadence:end, :, grp] .= vol
+                end
+            end
 
             Kora.run_model!(local_reef_state, env_conditions; rng=rng)
             covers[run_id] = collect(coral_cover(local_reef_state))
@@ -133,44 +138,54 @@ function fade_out_traces!(ax1, traces; duration_s=0.35, steps=12)
     return nothing
 end
 
-function ensemble_group_median(group_covers)
+function ensemble_group_summary(group_covers)
     valid = [gc for gc in group_covers if !isnothing(gc)]
     if isempty(valid)
         return nothing
     end
 
     n_ts, n_groups = size(valid[1])
-    med = zeros(Float32, n_ts, n_groups)
+    lower = zeros(Float32, n_ts, n_groups)
+    median_vals = zeros(Float32, n_ts, n_groups)
+    upper = zeros(Float32, n_ts, n_groups)
     tmp = zeros(Float32, length(valid))
 
     for ts in 1:n_ts, grp in 1:n_groups
         for (i, gc) in enumerate(valid)
             tmp[i] = gc[ts, grp]
         end
-        med[ts, grp] = median(tmp)
+        lower[ts, grp] = quantile(tmp, 0.025)
+        median_vals[ts, grp] = quantile(tmp, 0.5)
+        upper[ts, grp] = quantile(tmp, 0.975)
     end
 
-    return med
+    return (lower=lower, median=median_vals, upper=upper)
 end
 
-function plot_group_trajectories!(ax, group_matrix)
+function plot_group_trajectories!(ax, group_summary)
     empty!(ax)
-    if isnothing(group_matrix)
+    if isnothing(group_summary)
         autolimits!(ax)
         return nothing
     end
 
     colors = Makie.wong_colors()
-    for grp in 1:size(group_matrix, 2)
+    for grp in 1:size(group_summary.median, 2)
+        band!(
+            ax,
+            axes(group_summary.median, 1),
+            group_summary.lower[:, grp],
+            group_summary.upper[:, grp];
+            color=(colors[mod1(grp, length(colors))], 0.2)
+        )
         lines!(
             ax,
-            group_matrix[:, grp];
+            group_summary.median[:, grp];
             color=colors[mod1(grp, length(colors))],
             linewidth=2,
             label=GROUP_LABELS[grp]
         )
     end
-    axislegend(ax; position=:rt)
     autolimits!(ax)
 
     return nothing
@@ -209,10 +224,22 @@ function create_dashboard()
             label="Corymbose Acropora Deployment",
             interrupt=true
         )
+        non_acro_corymbose_volume = Bonito.Slider(
+            0:5:max_deploy_density;
+            value=0,
+            label="Pocillopora + non-Acropora corymbose Deployment",
+            interrupt=true
+        )
         massive_volume = Bonito.Slider(
             0:5:max_deploy_density;
             value=0,
             label="Small Massives Deployment",
+            interrupt=true
+        )
+        large_massive_volume = Bonito.Slider(
+            0:5:max_deploy_density;
+            value=0,
+            label="Large Massives Deployment",
             interrupt=true
         )
         run_button = Button("Run")
@@ -223,7 +250,13 @@ function create_dashboard()
         deploy_time = Bonito.Slider(
             1:n_years;
             value=default_deploy_year,
-            label="Deployment Time",
+            label="Deployment Start Year",
+            interrupt=true
+        )
+        revisit_cadence = Bonito.Slider(
+            1:25;
+            value=1,
+            label="Deployment Cadence (years)",
             interrupt=true
         )
 
@@ -256,7 +289,7 @@ function create_dashboard()
             xlabel="Timestep",
             ylabel="Cover [m²]"
         )
-        ax3 = Axis(fig[3, 1];
+        ax3 = Axis(fig[4, 1];
             title="Heat Stress [DHW]",
             xlabel="Timestep",
             ylabel="Degree Heating Weeks"
@@ -267,23 +300,42 @@ function create_dashboard()
             reef_state_ref[],
             env_conditions,
             default_deploy_year,
-            0,
-            0,
-            0,
+            1,
+            [0, 0, 0, 0, 0],
             RUNS_PER_CLICK
         ))
         traces_ref = Ref(plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1)))
-        plot_group_trajectories!(ax2, ensemble_group_median(initial_outputs_ref[].group_covers))
+        plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
+
+        Legend(
+            fig[3, 1],
+            ax2;
+            orientation=:horizontal,
+            tellwidth=false,
+            tellheight=true,
+            halign=:center,
+            valign=:center
+        )
+
         lines!(ax3, mean(env_conditions[:, :, At(:dhw)].data; dims=2)[:])
+
+        run_click_count = Ref(1)
+        run_in_progress = Threads.Atomic{Bool}(false)
+        run_status_text = Observable("Idle")
+        run_status_class = Observable("run-status idle")
 
         on(reset_button.value) do _
             @async begin
+                run_status_text[] = "Resetting view..."
+                run_status_class[] = "run-status running"
                 fade_out_traces!(ax1, traces_ref[])
                 traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1))
                 plot_group_trajectories!(
                     ax2,
-                    ensemble_group_median(initial_outputs_ref[].group_covers)
+                    ensemble_group_summary(initial_outputs_ref[].group_covers)
                 )
+                run_status_text[] = "Reset complete"
+                run_status_class[] = "run-status completed"
             end
         end
 
@@ -293,6 +345,8 @@ function create_dashboard()
                 return nothing
             end
             area_ref[] = area_val
+            run_status_text[] = "Resetting for new area..."
+            run_status_class[] = "run-status running"
 
             # Rebuild reef with new area and regenerate initial ensemble
             reef_state_ref[] = initialize_reef(;
@@ -308,37 +362,47 @@ function create_dashboard()
                 reef_state_ref[],
                 env_conditions,
                 default_deploy_year,
-                0,
-                0,
-                0,
+                Int(revisit_cadence.value[]),
+                [
+                    Int(tabular_volume.value[]),
+                    Int(corymbose_volume.value[]),
+                    Int(non_acro_corymbose_volume.value[]),
+                    Int(massive_volume.value[]),
+                    Int(large_massive_volume.value[])
+                ],
                 RUNS_PER_CLICK
             )
 
             # Reset plot and update title
             fade_out_traces!(ax1, traces_ref[])
             traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1))
-            plot_group_trajectories!(ax2, ensemble_group_median(initial_outputs_ref[].group_covers))
+            plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
             ax1.title[] = "Coral Cover Over Time\nReef Area: $(area_val)m²"
+            run_status_text[] = "Reset complete"
+            run_status_class[] = "run-status completed"
         end
-
-        run_click_count = Ref(1)
-        run_in_progress = Threads.Atomic{Bool}(false)
-        run_status_text = Observable("Idle")
-        run_status_class = Observable("run-status idle")
 
         # Reactive info-panel observables
         # Total corals deployed per year (sum across all three groups)
         total_deployed_obs = map(
-            (tv, cv, mv) -> tv + cv + mv,
-            tabular_volume, corymbose_volume, massive_volume
+            (tv, cv, nav, mv, lmv) -> tv + cv + nav + mv + lmv,
+            tabular_volume,
+            corymbose_volume,
+            non_acro_corymbose_volume,
+            massive_volume,
+            large_massive_volume
         )
         # Mean colony density per m² – derived from total and current area
         mean_density_obs = map(
-            (tv, cv, mv) -> begin
+            (tv, cv, nav, mv, lmv) -> begin
                 a = area_ref[]
-                a > 0 ? round((tv + cv + mv) / a; digits=2) : 0.0
+                a > 0 ? round((tv + cv + nav + mv + lmv) / a; digits=2) : 0.0
             end,
-            tabular_volume, corymbose_volume, massive_volume
+            tabular_volume,
+            corymbose_volume,
+            non_acro_corymbose_volume,
+            massive_volume,
+            large_massive_volume
         )
 
         # redraw_limit = nothing
@@ -352,10 +416,14 @@ function create_dashboard()
 
             tv_val = Int(tabular_volume.value[])
             cv_val = Int(corymbose_volume.value[])
+            nav_val = Int(non_acro_corymbose_volume.value[])
             mv_val = Int(massive_volume.value[])
+            lmv_val = Int(large_massive_volume.value[])
             dt_val = Int(deploy_time.value[])
+            revisit_val = Int(revisit_cadence.value[])
+            deploy_vals = [tv_val, cv_val, nav_val, mv_val, lmv_val]
 
-            @info "Running" deployment_start_year = dt_val tabular_per_year = tv_val corymbose_per_year = cv_val massive_per_year = mv_val
+            @info "Running" deployment_start_year = dt_val revisit_years = revisit_val deploy_per_year = deploy_vals
             run_click_count[] += 1
             run_color = color_for_click(run_click_count[])
 
@@ -363,7 +431,7 @@ function create_dashboard()
             #     close(redraw_limit)
             # end
 
-            if tv_val == 0 && cv_val == 0 && mv_val == 0
+            if all(==(0), deploy_vals)
                 run_status_text[] = "Idle (no deployments configured)"
                 run_status_class[] = "run-status idle"
                 # if @isdefined(redraw_limit) && !isnothing(redraw_limit)
@@ -374,7 +442,7 @@ function create_dashboard()
 
             current_reef = reef_state_ref[]
             run_in_progress[] = true
-            run_status_text[] = "Running $(RUNS_PER_CLICK) simulations..."
+            run_status_text[] = "Running ensemble of $(RUNS_PER_CLICK) simulations..."
             run_status_class[] = "run-status running"
             Threads.@spawn begin
                 started_at = time()
@@ -383,16 +451,15 @@ function create_dashboard()
                         current_reef,
                         env_conditions,
                         dt_val,
-                        tv_val,
-                        cv_val,
-                        mv_val,
+                        revisit_val,
+                        deploy_vals,
                         RUNS_PER_CLICK
                     )
                     traces_ref[] = vcat(
                         traces_ref[],
                         plot_covers!(ax1, outputs.covers, run_color)
                     )
-                    plot_group_trajectories!(ax2, ensemble_group_median(outputs.group_covers))
+                    plot_group_trajectories!(ax2, ensemble_group_summary(outputs.group_covers))
                 finally
                     elapsed_s = round(time() - started_at; digits=2)
                     run_in_progress[] = false
@@ -412,7 +479,7 @@ function create_dashboard()
                 DOM.div(
                     DOM.h3("Reef Settings"),
                     DOM.div(
-                        DOM.label("Reef area (m²):"; class="control-label"),
+                        DOM.label("Reef area [m²]:"; class="control-label"),
                         area_input
                     ),
                     DOM.h3("Simulation Info"),
@@ -440,7 +507,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                dtv -> "Deployed tabular Acropora per year ($(dtv)):",
+                                dtv -> "Deployed tabular Acropora per year [$(dtv)]:",
                                 tabular_volume
                             );
                             class="control-label"
@@ -450,7 +517,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                dcv -> "Deployed corymbose Acropora per year ($(dcv)):",
+                                dcv -> "Deployed corymbose Acropora per year [$(dcv)]:",
                                 corymbose_volume
                             );
                             class="control-label"
@@ -460,7 +527,17 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                smv -> "Deployed small massives per year ($(smv)):",
+                                dnav -> "Deployed Pocillopora + non-Acropora corymbose per year [$(dnav)]:",
+                                non_acro_corymbose_volume
+                            );
+                            class="control-label"
+                        ),
+                        non_acro_corymbose_volume
+                    ),
+                    DOM.div(
+                        DOM.label(
+                            map(
+                                smv -> "Deployed small massives per year [$(smv)]:",
                                 massive_volume
                             );
                             class="control-label"
@@ -469,10 +546,27 @@ function create_dashboard()
                     ),
                     DOM.div(
                         DOM.label(
-                            map(dst -> "Start deployments (Year $(dst)):", deploy_time);
+                            map(
+                                lmv -> "Deployed large massives per year [$(lmv)]:",
+                                large_massive_volume
+                            );
+                            class="control-label"
+                        ),
+                        large_massive_volume
+                    ),
+                    DOM.div(
+                        DOM.label(
+                            map(dst -> "Start deployments [Year $(dst)]:", deploy_time);
                             class="control-label"
                         ),
                         deploy_time
+                    ),
+                    DOM.div(
+                        DOM.label(
+                            map(rc -> "Revisit cadence [every $(rc) year(s)]:", revisit_cadence);
+                            class="control-label"
+                        ),
+                        revisit_cadence
                     ),
                     DOM.div(run_button, reset_button);
                     class="controls-panel"
