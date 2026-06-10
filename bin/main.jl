@@ -1,6 +1,12 @@
 using DotEnv
 
-DotEnv.load!()
+local_env_file = joinpath(@__DIR__, "..", ".env.local")
+if isfile(local_env_file)
+    DotEnv.load!(local_env_file)
+    @info "Loaded local development environment file: .env.local"
+else
+    DotEnv.load!()
+end
 
 include(joinpath(@__DIR__, "..", "src", "main.jl"))
 

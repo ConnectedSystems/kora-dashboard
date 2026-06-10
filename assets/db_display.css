@@ -78,3 +78,68 @@
     box-shadow: 0 4px 20px rgba(0,0,0,0.1);
     padding: 20px;
 }
+
+/* Info Panel */
+.info-panel {
+    background-color: #f0f4f8;
+    border-left: 4px solid #3498db;
+    border-radius: 6px;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    font-size: 14px;
+}
+
+.info-panel > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    border-bottom: 1px solid #d8e4ee;
+}
+
+.info-panel > div:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    color: #5d6d7e;
+    font-weight: bold;
+    margin-right: 8px;
+}
+
+.info-value {
+    color: #2c3e50;
+    font-weight: normal;
+    text-align: right;
+}
+
+/* Run status indicator */
+.run-status-panel {
+    margin-bottom: 20px;
+}
+
+.run-status {
+    display: block;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.run-status.idle {
+    background-color: #edf7ed;
+    color: #1e5f32;
+    border-left: 4px solid #2e7d32;
+}
+
+.run-status.running {
+    background-color: #fff8e1;
+    color: #8a5400;
+    border-left: 4px solid #ffb300;
+}
+
+.run-status.completed {
+    background-color: #e8f5e9;
+    color: #1b5e20;
+    border-left: 4px solid #2e7d32;
+}

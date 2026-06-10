@@ -1,7 +1,7 @@
-# coralflow-dashboard
+# kora-dashboard
 
-Dashboard for CoralFlow, a model developed to simulate representative transects of coral
-reefs.
+Dashboard for Kora, a model developed to simulate representative transects of coral
+reefs for comparative assessment and decision support purposes.
 
 
 ## Setup
@@ -15,6 +15,12 @@ julia --project=.
 
 Place required data into the `data` directory.
 
-- `ecorrap to cscape species.csv` : Mapping of EcoRRAP species to relevant functional groups
-- `ecorrap_adult_juv_combined_2021_2023_24062025.csv` : Collated EcoRRAP data
+- `ecorrap_to_cscape_species.csv` : Mapping of EcoRRAP species to relevant functional groups
+- `ecorrap_expanded.parquet` : Collated EcoRRAP data (Parquet format)
 - `DHWs/dhwRCP45.nc` : NetCDF of SSP2-4.5 scenarios
+
+To launch:
+
+```julia
+include("bin/main.jl")
+```
