@@ -1,6 +1,7 @@
 using Base.Threads
 using Random
 using Statistics
+using Distributions
 using WGLMakie
 using Bonito, Bonito.Observables
 using NCDatasets, YAXArrays
@@ -18,13 +19,37 @@ const GROWTH_MODEL_FILE = joinpath(OUTPUT_DIR, "offshore_north_growth_models.jso
 const SURVIVAL_MODEL_FILE = joinpath(OUTPUT_DIR, "offshore_north_survival_models.json")
 const RUNS_PER_CLICK = 25
 const BASE_SEED = 148
+const INITIAL_RUN_COLOR = :gray55
+
+"""
+Compute expected cover (m²) per colony averaged across all 5 groups with equal
+proportions, sampling from the same truncated log-normal size distributions used
+by initialize_coral_population!. Used to convert a target cover fraction to a
+target colony count.
+"""
+function _mean_colony_cover_m2(n_per_grp::Int=20_000)::Float32
+    rng = Random.MersenneTwister(0)
+    dists = Kora.size_distribution()
+    edges = Kora.bin_edges()
+    n_grps = size(edges, 1)
+    total = 0.0f0
+    for grp in 1:n_grps
+        d = truncated(dists[grp], 0.0f0, maximum(edges[grp, :]))
+        samples = Float32.(rand(rng, d, n_per_grp))
+        total += sum(cover_cm_to_m2.(samples))
+    end
+    return total / (n_per_grp * n_grps)
+end
+
+const MEAN_COLONY_COVER_M2 = _mean_colony_cover_m2()
+
 const GROUP_LABELS = if isdefined(Kora, :GROUP_NAMES)
     collect(getproperty(Kora, :GROUP_NAMES))
 else
     [
         "Tabular Acropora",
         "Corymbose Acropora",
-        "Pocillopora + non-Acropora corymbose",
+        "branching non-Acropora",
         "Small massives + encrusting",
         "Large massives"
     ]
@@ -58,7 +83,7 @@ function color_for_click(click::Int)
     return palette[mod1(click, length(palette))]
 end
 
-function simulate_outputs(reef_state, env_conditions, dt, revisit_cadence, deploy_volumes, n_runs)
+function simulate_outputs(reef_state, env_conditions, dt, revisit_cadence, deploy_volumes, n_runs; init_cover_fraction=0.3f0)
     covers = Vector{Union{Nothing,Vector{Float32}}}(undef, n_runs)
     group_covers = Vector{Union{Nothing,Matrix{Float32}}}(undef, n_runs)
 
@@ -70,10 +95,13 @@ function simulate_outputs(reef_state, env_conditions, dt, revisit_cadence, deplo
 
         try
             Kora.reset!(local_reef_state)
+            # Convert target cover fraction → colony count using expected m² per colony
+            target_cover_m2 = init_cover_fraction * maximum(local_reef_state.carrying_capacity)
+            target_pop = max(5, ceil(Int64, target_cover_m2 / MEAN_COLONY_COVER_M2))
             initialize_coral_population!(
                 local_reef_state,
                 1,
-                ceil(Int64, 3 * maximum(local_reef_state.carrying_capacity));
+                target_pop;
                 group_proportions=fill(0.2f0, 5),
                 rng=rng
             )
@@ -227,7 +255,7 @@ function create_dashboard()
         non_acro_corymbose_volume = Bonito.Slider(
             0:5:max_deploy_density;
             value=0,
-            label="Pocillopora + non-Acropora corymbose Deployment",
+            label="branching non-Acropora Deployment",
             interrupt=true
         )
         massive_volume = Bonito.Slider(
@@ -242,6 +270,15 @@ function create_dashboard()
             label="Large Massives Deployment",
             interrupt=true
         )
+
+        # Initial population density as % of maximum possible (density * area)
+        init_cover_pct = Bonito.Slider(
+            5:5:100;
+            value=30,
+            label="Initial Population (%)",
+            interrupt=true
+        )
+
         run_button = Button("Run")
         reset_button = Button("Reset")
 
@@ -302,9 +339,10 @@ function create_dashboard()
             default_deploy_year,
             1,
             [0, 0, 0, 0, 0],
-            RUNS_PER_CLICK
+            RUNS_PER_CLICK;
+            init_cover_fraction=Float32(init_cover_pct.value[]) / 100f0
         ))
-        traces_ref = Ref(plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1)))
+        traces_ref = Ref(plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR))
         plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
 
         Legend(
@@ -319,6 +357,7 @@ function create_dashboard()
 
         lines!(ax3, mean(env_conditions[:, :, At(:dhw)].data; dims=2)[:])
 
+        last_init_cover_pct = Ref(Int(init_cover_pct.value[]))
         run_click_count = Ref(1)
         run_in_progress = Threads.Atomic{Bool}(false)
         run_status_text = Observable("Idle")
@@ -329,7 +368,7 @@ function create_dashboard()
                 run_status_text[] = "Resetting view..."
                 run_status_class[] = "run-status running"
                 fade_out_traces!(ax1, traces_ref[])
-                traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1))
+                traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR)
                 plot_group_trajectories!(
                     ax2,
                     ensemble_group_summary(initial_outputs_ref[].group_covers)
@@ -370,12 +409,13 @@ function create_dashboard()
                     Int(massive_volume.value[]),
                     Int(large_massive_volume.value[])
                 ],
-                RUNS_PER_CLICK
+                RUNS_PER_CLICK;
+                init_cover_fraction=Float32(init_cover_pct.value[]) / 100f0
             )
 
             # Reset plot and update title
             fade_out_traces!(ax1, traces_ref[])
-            traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1))
+            traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR)
             plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
             ax1.title[] = "Coral Cover Over Time\nReef Area: $(area_val)m²"
             run_status_text[] = "Reset complete"
@@ -431,35 +471,55 @@ function create_dashboard()
             #     close(redraw_limit)
             # end
 
-            if all(==(0), deploy_vals)
+            current_reef = reef_state_ref[]
+            pct_val = Int(init_cover_pct.value[])
+            init_cover_frac = Float32(pct_val) / 100f0
+            cover_pct_changed = pct_val != last_init_cover_pct[]
+            last_init_cover_pct[] = pct_val
+            no_deployments = all(==(0), deploy_vals)
+
+            if no_deployments && !cover_pct_changed
                 run_status_text[] = "Idle (no deployments configured)"
                 run_status_class[] = "run-status idle"
-                # if @isdefined(redraw_limit) && !isnothing(redraw_limit)
-                #     close(redraw_limit)
-                # end
                 return nothing
             end
 
-            current_reef = reef_state_ref[]
             run_in_progress[] = true
             run_status_text[] = "Running ensemble of $(RUNS_PER_CLICK) simulations..."
             run_status_class[] = "run-status running"
             Threads.@spawn begin
                 started_at = time()
                 try
-                    outputs = simulate_outputs(
-                        current_reef,
-                        env_conditions,
-                        dt_val,
-                        revisit_val,
-                        deploy_vals,
-                        RUNS_PER_CLICK
-                    )
-                    traces_ref[] = vcat(
-                        traces_ref[],
-                        plot_covers!(ax1, outputs.covers, run_color)
-                    )
-                    plot_group_trajectories!(ax2, ensemble_group_summary(outputs.group_covers))
+                    if cover_pct_changed
+                        initial_outputs_ref[] = simulate_outputs(
+                            current_reef,
+                            env_conditions,
+                            default_deploy_year,
+                            1,
+                            [0, 0, 0, 0, 0],
+                            RUNS_PER_CLICK;
+                            init_cover_fraction=init_cover_frac
+                        )
+                        fade_out_traces!(ax1, traces_ref[])
+                        traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR)
+                        plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
+                    end
+                    if !no_deployments
+                        outputs = simulate_outputs(
+                            current_reef,
+                            env_conditions,
+                            dt_val,
+                            revisit_val,
+                            deploy_vals,
+                            RUNS_PER_CLICK;
+                            init_cover_fraction=init_cover_frac
+                        )
+                        traces_ref[] = vcat(
+                            traces_ref[],
+                            plot_covers!(ax1, outputs.covers, run_color)
+                        )
+                        plot_group_trajectories!(ax2, ensemble_group_summary(outputs.group_covers))
+                    end
                 finally
                     elapsed_s = round(time() - started_at; digits=2)
                     run_in_progress[] = false
@@ -481,6 +541,16 @@ function create_dashboard()
                     DOM.div(
                         DOM.label("Reef area [m²]:"; class="control-label"),
                         area_input
+                    ),
+                    DOM.div(
+                        DOM.label(
+                            map(
+                                pct -> "Initial coral cover [$(pct)% = $(round(pct / 100.0 * area_ref[]; digits=2)) m²]:",
+                                init_cover_pct
+                            );
+                            class="control-label"
+                        ),
+                        init_cover_pct
                     ),
                     DOM.h3("Simulation Info"),
                     DOM.div(
