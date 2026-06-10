@@ -58,6 +58,10 @@
     font-size: 14px;
 }
 
+.control-label.validation-error {
+    color: #c0392b;
+}
+
 .slider-container {
     margin-bottom: 8px;
 }

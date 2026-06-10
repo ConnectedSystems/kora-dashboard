@@ -20,26 +20,11 @@ const SURVIVAL_MODEL_FILE = joinpath(OUTPUT_DIR, "offshore_north_survival_models
 const RUNS_PER_CLICK = 25
 const BASE_SEED = 148
 const INITIAL_RUN_COLOR = :gray55
+const MIN_REEF_AREA_M2 = 30.0
+const MAX_REEF_AREA_M2 = 500.0
 
-"""
-Compute expected cover (m²) per colony averaged across all 5 groups with equal
-proportions, sampling from the same truncated log-normal size distributions used
-by initialize_coral_population!. Used to convert a target cover fraction to a
-target colony count.
-"""
-function _mean_colony_cover_m2(n_per_grp::Int=20_000)::Float32
-    rng = Random.MersenneTwister(0)
-    dists = Kora.size_distribution()
-    edges = Kora.bin_edges()
-    n_grps = size(edges, 1)
-    total = 0.0f0
-    for grp in 1:n_grps
-        d = truncated(dists[grp], 0.0f0, maximum(edges[grp, :]))
-        samples = Float32.(rand(rng, d, n_per_grp))
-        total += sum(cover_cm_to_m2.(samples))
-    end
-    return total / (n_per_grp * n_grps)
-end
+include("sim_helpers.jl")
+include("plot_helpers.jl")
 
 const MEAN_COLONY_COVER_M2 = _mean_colony_cover_m2()
 
@@ -78,152 +63,13 @@ else
     @info "Models created and saved successfully!"
 end
 
-function color_for_click(click::Int)
-    palette = Makie.wong_colors()
-    return palette[mod1(click, length(palette))]
-end
-
-function simulate_outputs(reef_state, env_conditions, dt, revisit_cadence, deploy_volumes, n_runs; init_cover_fraction=0.3f0)
-    covers = Vector{Union{Nothing,Vector{Float32}}}(undef, n_runs)
-    group_covers = Vector{Union{Nothing,Matrix{Float32}}}(undef, n_runs)
-
-    # Run simulations in parallel. Each run gets an independent reef copy.
-    @threads for run_id in 1:n_runs
-        local_reef_state = copy(reef_state)
-        rng = Random.default_rng()
-        Random.seed!(rng, BASE_SEED + run_id - 1)
-
-        try
-            Kora.reset!(local_reef_state)
-            # Convert target cover fraction → colony count using expected m² per colony
-            target_cover_m2 = init_cover_fraction * maximum(local_reef_state.carrying_capacity)
-            target_pop = max(5, ceil(Int64, target_cover_m2 / MEAN_COLONY_COVER_M2))
-            initialize_coral_population!(
-                local_reef_state,
-                1,
-                target_pop;
-                group_proportions=fill(0.2f0, 5),
-                rng=rng
-            )
-
-            # Configure deployments based on slider values
-            local_reef_state.deployment_times .= 0  # reset deployment tracker
-            cadence = max(1, revisit_cadence)
-            n_grps = min(length(deploy_volumes), size(local_reef_state.deployment_times, 3))
-            for grp in 1:n_grps
-                vol = deploy_volumes[grp]
-                if vol > 0
-                    local_reef_state.deployment_times[dt:cadence:end, :, grp] .= vol
-                end
-            end
-
-            Kora.run_model!(local_reef_state, env_conditions; rng=rng)
-            covers[run_id] = collect(coral_cover(local_reef_state))
-            group_covers[run_id] = Matrix(group_cover(local_reef_state))
-        catch e
-            @warn "Model run $run_id failed: $e"
-            covers[run_id] = nothing
-            group_covers[run_id] = nothing
-        end
-    end
-
-    return (covers=covers, group_covers=group_covers)
-end
-
-function plot_covers!(ax1, covers, run_color; alpha=0.35)
-    traces = Vector{NamedTuple{(:plot, :alpha),Tuple{Any,Observable{Float64}}}}()
-
-    for cover in covers
-        if isnothing(cover)
-            continue
-        end
-        alpha_obs = Observable(alpha)
-        plot_obj = lines!(ax1, cover; alpha=alpha_obs, color=run_color)
-        push!(traces, (plot=plot_obj, alpha=alpha_obs))
-    end
-
-    # Ensure axis limits update to include newly drawn traces.
-    autolimits!(ax1)
-
-    return traces
-end
-
-function fade_out_traces!(ax1, traces; duration_s=0.35, steps=12)
-    if isempty(traces)
-        return nothing
-    end
-
-    for step in 1:steps
-        f = 1.0 - (step / steps)
-        for tr in traces
-            tr.alpha[] = 0.35 * f
-        end
-        sleep(duration_s / steps)
-    end
-
-    empty!(ax1)
-    autolimits!(ax1)
-    return nothing
-end
-
-function ensemble_group_summary(group_covers)
-    valid = [gc for gc in group_covers if !isnothing(gc)]
-    if isempty(valid)
-        return nothing
-    end
-
-    n_ts, n_groups = size(valid[1])
-    lower = zeros(Float32, n_ts, n_groups)
-    median_vals = zeros(Float32, n_ts, n_groups)
-    upper = zeros(Float32, n_ts, n_groups)
-    tmp = zeros(Float32, length(valid))
-
-    for ts in 1:n_ts, grp in 1:n_groups
-        for (i, gc) in enumerate(valid)
-            tmp[i] = gc[ts, grp]
-        end
-        lower[ts, grp] = quantile(tmp, 0.025)
-        median_vals[ts, grp] = quantile(tmp, 0.5)
-        upper[ts, grp] = quantile(tmp, 0.975)
-    end
-
-    return (lower=lower, median=median_vals, upper=upper)
-end
-
-function plot_group_trajectories!(ax, group_summary)
-    empty!(ax)
-    if isnothing(group_summary)
-        autolimits!(ax)
-        return nothing
-    end
-
-    colors = Makie.wong_colors()
-    for grp in 1:size(group_summary.median, 2)
-        band!(
-            ax,
-            axes(group_summary.median, 1),
-            group_summary.lower[:, grp],
-            group_summary.upper[:, grp];
-            color=(colors[mod1(grp, length(colors))], 0.2)
-        )
-        lines!(
-            ax,
-            group_summary.median[:, grp];
-            color=colors[mod1(grp, length(colors))],
-            linewidth=2,
-            label=GROUP_LABELS[grp]
-        )
-    end
-    autolimits!(ax)
-
-    return nothing
-end
-
 function create_dashboard()
     dhw_datasets = joinpath(@__DIR__, "..", "data", "DHWs")
     dhw45 = NCDataset(joinpath(dhw_datasets, "dhwRCP45.nc"))
     target_site = "Moore_16071_Slope_66"
     target_col = first(findall(dhw45["reef_siteid"][:] .== target_site))
+    dhw_seq = dhw45["dhw"][:, target_col, 1]
+    n_years = length(dhw_seq)
 
     # Add CSS
     styling = Bonito.Asset(joinpath(@__DIR__, "..", "assets", "db_display.css"))
@@ -231,11 +77,12 @@ function create_dashboard()
     # Create the app
     app = App(; title="Kora") do
         # Model parameters
-        n_years = 75
         n_locs = 1
 
         pop_density = 10  # per m²
         area_ref = Ref(72.0)  # current reef area in m²
+        area_obs = Observable(area_ref[])
+        area_validation_text = Observable("")
         area_input = Bonito.TextField("$(area_ref[])"; placeholder="Reef area (m²)")
 
         # Create sliders for deployment volumes
@@ -311,7 +158,6 @@ function create_dashboard()
         env_conditions = generate_example_environment(n_years, n_locs; with_dhw=false)
 
         # Replace example DHWs with one for a slopey site on Moore Reef
-        dhw_seq = dhw45["dhw"][:, target_col, 1]
         env_conditions[1:length(dhw_seq), 1, 1] .= dhw_seq
 
         # Create figure for visualization
@@ -342,8 +188,10 @@ function create_dashboard()
             RUNS_PER_CLICK;
             init_cover_fraction=Float32(init_cover_pct.value[]) / 100f0
         ))
-        traces_ref = Ref(plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR))
-        plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
+        cover_traces_ref = Ref(plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR))
+        group_traces_ref = Ref(
+            plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
+        )
 
         Legend(
             fig[3, 1],
@@ -363,16 +211,45 @@ function create_dashboard()
         run_status_text = Observable("Idle")
         run_status_class = Observable("run-status idle")
 
+        initial_cover_label_text = map(
+            (pct, area, validation_text) -> begin
+                if !isempty(validation_text)
+                    return validation_text
+                end
+                return "Initial coral cover [$(pct)% = $(round(pct / 100.0 * area; digits=2)) m²]:"
+            end,
+            init_cover_pct,
+            area_obs,
+            area_validation_text
+        )
+        initial_cover_label_class = map(
+            txt -> isempty(txt) ? "control-label" : "control-label validation-error",
+            area_validation_text
+        )
+
         on(reset_button.value) do _
             @async begin
-                run_status_text[] = "Resetting view..."
+                run_status_text[] = "Resetting..."
                 run_status_class[] = "run-status running"
-                fade_out_traces!(ax1, traces_ref[])
-                traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR)
-                plot_group_trajectories!(
-                    ax2,
-                    ensemble_group_summary(initial_outputs_ref[].group_covers)
+                initial_outputs_ref[] = simulate_outputs(
+                    reef_state_ref[],
+                    env_conditions,
+                    default_deploy_year,
+                    1,
+                    [0, 0, 0, 0, 0],
+                    RUNS_PER_CLICK;
+                    init_cover_fraction=Float32(init_cover_pct.value[]) / 100f0
                 )
+                baseline_traces = reset_baseline_plots!(
+                    ax1,
+                    ax2,
+                    initial_outputs_ref[],
+                    INITIAL_RUN_COLOR,
+                    cover_traces_ref[],
+                    group_traces_ref[]
+                )
+                cover_traces_ref[] = baseline_traces.cover_traces
+                group_traces_ref[] = baseline_traces.group_traces
                 run_status_text[] = "Reset complete"
                 run_status_class[] = "run-status completed"
             end
@@ -380,10 +257,18 @@ function create_dashboard()
 
         on(area_input.value) do val_str
             area_val = tryparse(Float64, strip(val_str))
-            if isnothing(area_val) || area_val <= 0
+            if isnothing(area_val)
+                area_validation_text[] = "Reef area must be numeric ($(Int(MIN_REEF_AREA_M2))-$(Int(MAX_REEF_AREA_M2)) m²)."
                 return nothing
             end
+            if area_val < MIN_REEF_AREA_M2 || area_val > MAX_REEF_AREA_M2
+                area_validation_text[] = "Initial coral cover [reef area must be between $(Int(MIN_REEF_AREA_M2)) and $(Int(MAX_REEF_AREA_M2)) m²]:"
+                return nothing
+            end
+
+            area_validation_text[] = ""
             area_ref[] = area_val
+            area_obs[] = area_val
             run_status_text[] = "Resetting for new area..."
             run_status_class[] = "run-status running"
 
@@ -414,9 +299,16 @@ function create_dashboard()
             )
 
             # Reset plot and update title
-            fade_out_traces!(ax1, traces_ref[])
-            traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR)
-            plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
+            baseline_traces = reset_baseline_plots!(
+                ax1,
+                ax2,
+                initial_outputs_ref[],
+                INITIAL_RUN_COLOR,
+                cover_traces_ref[],
+                group_traces_ref[]
+            )
+            cover_traces_ref[] = baseline_traces.cover_traces
+            group_traces_ref[] = baseline_traces.group_traces
             ax1.title[] = "Coral Cover Over Time\nReef Area: $(area_val)m²"
             run_status_text[] = "Reset complete"
             run_status_class[] = "run-status completed"
@@ -500,9 +392,16 @@ function create_dashboard()
                             RUNS_PER_CLICK;
                             init_cover_fraction=init_cover_frac
                         )
-                        fade_out_traces!(ax1, traces_ref[])
-                        traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR)
-                        plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
+                        baseline_traces = reset_baseline_plots!(
+                            ax1,
+                            ax2,
+                            initial_outputs_ref[],
+                            INITIAL_RUN_COLOR,
+                            cover_traces_ref[],
+                            group_traces_ref[]
+                        )
+                        cover_traces_ref[] = baseline_traces.cover_traces
+                        group_traces_ref[] = baseline_traces.group_traces
                     end
                     if !no_deployments
                         outputs = simulate_outputs(
@@ -514,11 +413,14 @@ function create_dashboard()
                             RUNS_PER_CLICK;
                             init_cover_fraction=init_cover_frac
                         )
-                        traces_ref[] = vcat(
-                            traces_ref[],
+                        cover_traces_ref[] = vcat(
+                            cover_traces_ref[],
                             plot_covers!(ax1, outputs.covers, run_color)
                         )
-                        plot_group_trajectories!(ax2, ensemble_group_summary(outputs.group_covers))
+                        group_traces_ref[] = plot_group_trajectories!(
+                            ax2,
+                            ensemble_group_summary(outputs.group_covers)
+                        )
                     end
                 finally
                     elapsed_s = round(time() - started_at; digits=2)
@@ -544,11 +446,8 @@ function create_dashboard()
                     ),
                     DOM.div(
                         DOM.label(
-                            map(
-                                pct -> "Initial coral cover [$(pct)% = $(round(pct / 100.0 * area_ref[]; digits=2)) m²]:",
-                                init_cover_pct
-                            );
-                            class="control-label"
+                            initial_cover_label_text;
+                            class=initial_cover_label_class
                         ),
                         init_cover_pct
                     ),
@@ -556,7 +455,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.div(
                             DOM.span("Area represented: "; class="info-label"),
-                            DOM.span(map(v -> "$(v) m²", area_input); class="info-value")
+                            DOM.span(map(v -> "$(v) m²", area_obs); class="info-value")
                         ),
                         DOM.div(
                             DOM.span("Total corals deployed/year: "; class="info-label"),
@@ -597,7 +496,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                dnav -> "Deployed Pocillopora + non-Acropora corymbose per year [$(dnav)]:",
+                                dnav -> "Deployed branching non-Acropora per year [$(dnav)]:",
                                 non_acro_corymbose_volume
                             );
                             class="control-label"
