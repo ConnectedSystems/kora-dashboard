@@ -1,5 +1,6 @@
 [deps]
 Bonito = "824d6782-a2ef-11e9-3a09-e5662e0c26f8"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 DotEnv = "4dc1fcf4-5e3b-5448-94ab-0c38ec0385c1"
 Kora = "63f594c6-e77c-4cfd-819e-df68f57e9897"
 NCDatasets = "85f8d34a-cbdd-5861-8df4-14fed0d494ab"
