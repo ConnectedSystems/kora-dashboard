@@ -1,48 +1,66 @@
 using Base.Threads
-using Dates
 using Random
 using Statistics
 using WGLMakie
 using Bonito, Bonito.Observables
-using CSV, DataFrames, NCDatasets, Parquet2, YAXArrays
+using NCDatasets, YAXArrays
+using Parquet2
 using Kora
 
 import Bonito.TailwindDashboard as D
-import Kora: process_ecorrap_models
+import Kora: load_models, process_ecorrap_models
 
 const DATA_DIR = joinpath(@__DIR__, "..", "data")
 const ECORRAP_FILE = joinpath(DATA_DIR, "ecorrap_expanded.parquet")
 const FG_FILE = joinpath(DATA_DIR, "ecorrap_to_cscape_species.csv")
 const OUTPUT_DIR = joinpath(DATA_DIR, "models")
+const GROWTH_MODEL_FILE = joinpath(OUTPUT_DIR, "offshore_north_growth_models.json")
+const SURVIVAL_MODEL_FILE = joinpath(OUTPUT_DIR, "offshore_north_survival_models.json")
 const RUNS_PER_CLICK = 25
 const BASE_SEED = 148
+const GROUP_LABELS = if isdefined(Kora, :GROUP_NAMES)
+    collect(getproperty(Kora, :GROUP_NAMES))
+else
+    [
+        "Tabular Acropora",
+        "Corymbose Acropora",
+        "Pocillopora + non-Acropora corymbose",
+        "Small massives + encrusting",
+        "Large massives"
+    ]
+end
 
-# Process EcoRRAP data to create models
-@info "Processing EcoRRAP data to create models..."
-model_results = process_ecorrap_models(
-    ECORRAP_FILE,
-    FG_FILE;
-    region="offshore_north",
-    growth_degree=1,
-    survival_degree=2,
-    save_models=true,
-    output_dir=OUTPUT_DIR,
-    plot_validation=false
-)
+if isfile(GROWTH_MODEL_FILE) && isfile(SURVIVAL_MODEL_FILE)
+    @info "Loading saved Kora model specifications..."
+    const growth_models = load_models(GROWTH_MODEL_FILE)
+    const survival_models = load_models(SURVIVAL_MODEL_FILE)
+else
+    @info "Saved Kora model specifications not found; processing EcoRRAP data..."
+    model_results = process_ecorrap_models(
+        ECORRAP_FILE,
+        FG_FILE;
+        region="offshore_north",
+        growth_degree=1,
+        survival_degree=2,
+        save_models=true,
+        output_dir=OUTPUT_DIR,
+        plot_validation=false
+    )
 
-# Extract the fitted models
-growth_models = model_results.growth_fits
-survival_models = model_results.survival_fits
+    const growth_models = model_results.growth_fits
+    const survival_models = model_results.survival_fits
 
-@info "Models created successfully!"
+    @info "Models created and saved successfully!"
+end
 
 function color_for_click(click::Int)
     palette = Makie.wong_colors()
     return palette[mod1(click, length(palette))]
 end
 
-function simulate_covers(reef_state, env_conditions, dt, tv, cv, mv, n_runs)
+function simulate_outputs(reef_state, env_conditions, dt, tv, cv, mv, n_runs)
     covers = Vector{Union{Nothing,Vector{Float32}}}(undef, n_runs)
+    group_covers = Vector{Union{Nothing,Matrix{Float32}}}(undef, n_runs)
 
     # Run simulations in parallel. Each run gets an independent reef copy.
     @threads for run_id in 1:n_runs
@@ -68,13 +86,15 @@ function simulate_covers(reef_state, env_conditions, dt, tv, cv, mv, n_runs)
 
             Kora.run_model!(local_reef_state, env_conditions; rng=rng)
             covers[run_id] = collect(coral_cover(local_reef_state))
+            group_covers[run_id] = Matrix(group_cover(local_reef_state))
         catch e
             @warn "Model run $run_id failed: $e"
             covers[run_id] = nothing
+            group_covers[run_id] = nothing
         end
     end
 
-    return covers
+    return (covers=covers, group_covers=group_covers)
 end
 
 function plot_covers!(ax1, covers, run_color; alpha=0.35)
@@ -110,6 +130,49 @@ function fade_out_traces!(ax1, traces; duration_s=0.35, steps=12)
 
     empty!(ax1)
     autolimits!(ax1)
+    return nothing
+end
+
+function ensemble_group_median(group_covers)
+    valid = [gc for gc in group_covers if !isnothing(gc)]
+    if isempty(valid)
+        return nothing
+    end
+
+    n_ts, n_groups = size(valid[1])
+    med = zeros(Float32, n_ts, n_groups)
+    tmp = zeros(Float32, length(valid))
+
+    for ts in 1:n_ts, grp in 1:n_groups
+        for (i, gc) in enumerate(valid)
+            tmp[i] = gc[ts, grp]
+        end
+        med[ts, grp] = median(tmp)
+    end
+
+    return med
+end
+
+function plot_group_trajectories!(ax, group_matrix)
+    empty!(ax)
+    if isnothing(group_matrix)
+        autolimits!(ax)
+        return nothing
+    end
+
+    colors = Makie.wong_colors()
+    for grp in 1:size(group_matrix, 2)
+        lines!(
+            ax,
+            group_matrix[:, grp];
+            color=colors[mod1(grp, length(colors))],
+            linewidth=2,
+            label=GROUP_LABELS[grp]
+        )
+    end
+    axislegend(ax; position=:rt)
+    autolimits!(ax)
+
     return nothing
 end
 
@@ -182,20 +245,25 @@ function create_dashboard()
         env_conditions[1:length(dhw_seq), 1, 1] .= dhw_seq
 
         # Create figure for visualization
-        fig = Figure(; size=(800, 600))
+        fig = Figure(; size=(900, 900))
         ax1 = Axis(fig[1, 1];
             title="Coral Cover Over Time\nReef Area: $(area_ref[])m²",
             xlabel="Timestep",
             ylabel="Cover [m²]"
         )
         ax2 = Axis(fig[2, 1];
+            title="Cover by Functional Group",
+            xlabel="Timestep",
+            ylabel="Cover [m²]"
+        )
+        ax3 = Axis(fig[3, 1];
             title="Heat Stress [DHW]",
             xlabel="Timestep",
             ylabel="Degree Heating Weeks"
         )
 
         # Initial plots (same 50-run ensemble behavior as Run button)
-        initial_covers_ref = Ref(simulate_covers(
+        initial_outputs_ref = Ref(simulate_outputs(
             reef_state_ref[],
             env_conditions,
             default_deploy_year,
@@ -204,13 +272,18 @@ function create_dashboard()
             0,
             RUNS_PER_CLICK
         ))
-        traces_ref = Ref(plot_covers!(ax1, initial_covers_ref[], color_for_click(1)))
-        lines!(ax2, mean(env_conditions[:, :, At(:dhw)].data; dims=2)[:])
+        traces_ref = Ref(plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1)))
+        plot_group_trajectories!(ax2, ensemble_group_median(initial_outputs_ref[].group_covers))
+        lines!(ax3, mean(env_conditions[:, :, At(:dhw)].data; dims=2)[:])
 
         on(reset_button.value) do _
             @async begin
                 fade_out_traces!(ax1, traces_ref[])
-                traces_ref[] = plot_covers!(ax1, initial_covers_ref[], color_for_click(1))
+                traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1))
+                plot_group_trajectories!(
+                    ax2,
+                    ensemble_group_median(initial_outputs_ref[].group_covers)
+                )
             end
         end
 
@@ -231,7 +304,7 @@ function create_dashboard()
                 growth_models=growth_models,
                 survival_models=survival_models
             )
-            initial_covers_ref[] = simulate_covers(
+            initial_outputs_ref[] = simulate_outputs(
                 reef_state_ref[],
                 env_conditions,
                 default_deploy_year,
@@ -243,7 +316,8 @@ function create_dashboard()
 
             # Reset plot and update title
             fade_out_traces!(ax1, traces_ref[])
-            traces_ref[] = plot_covers!(ax1, initial_covers_ref[], color_for_click(1))
+            traces_ref[] = plot_covers!(ax1, initial_outputs_ref[].covers, color_for_click(1))
+            plot_group_trajectories!(ax2, ensemble_group_median(initial_outputs_ref[].group_covers))
             ax1.title[] = "Coral Cover Over Time\nReef Area: $(area_val)m²"
         end
 
@@ -305,7 +379,7 @@ function create_dashboard()
             Threads.@spawn begin
                 started_at = time()
                 try
-                    covers = simulate_covers(
+                    outputs = simulate_outputs(
                         current_reef,
                         env_conditions,
                         dt_val,
@@ -314,7 +388,11 @@ function create_dashboard()
                         mv_val,
                         RUNS_PER_CLICK
                     )
-                    traces_ref[] = vcat(traces_ref[], plot_covers!(ax1, covers, run_color))
+                    traces_ref[] = vcat(
+                        traces_ref[],
+                        plot_covers!(ax1, outputs.covers, run_color)
+                    )
+                    plot_group_trajectories!(ax2, ensemble_group_median(outputs.group_covers))
                 finally
                     elapsed_s = round(time() - started_at; digits=2)
                     run_in_progress[] = false

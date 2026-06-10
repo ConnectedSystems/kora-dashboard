@@ -2,7 +2,7 @@
 
 julia_version = "1.11.7"
 manifest_format = "2.0"
-project_hash = "12cd05afee31354ed95c0fb2e274c73ee1c98c60"
+project_hash = "512ede425641e7c09141fd9e27c3cba27f48b515"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "bbc22a9a08a0ef6460041086d8a7b27940ed4ffd"
@@ -1164,7 +1164,7 @@ version = "0.6.12"
 
 [[deps.Kora]]
 deps = ["Bootstrap", "CSV", "CurveFit", "DataFrames", "Dates", "DiskArrays", "Distributions", "GLM", "Interpolations", "JSON", "KernelDensity", "MLBase", "Missings", "ModelParameters", "OnlineStats", "OrderedCollections", "Polynomials", "PrecompileSignatures", "PrecompileTools", "Printf", "ProgressLogging", "QuadGK", "Random", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "TerminalLoggers", "YAXArrays"]
-path = "c:/Users/tiwanaga/projects/DS_projects/Kora.jl"
+path = "../Kora.jl"
 uuid = "63f594c6-e77c-4cfd-819e-df68f57e9897"
 version = "1.0.0"
 
