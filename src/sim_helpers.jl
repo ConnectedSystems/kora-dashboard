@@ -21,6 +21,7 @@ end
 function simulate_outputs(reef_state, env_conditions, dt, revisit_cadence, deploy_volumes, n_runs; init_cover_fraction=0.3f0)
     covers = Vector{Union{Nothing,Vector{Float32}}}(undef, n_runs)
     group_covers = Vector{Union{Nothing,Matrix{Float32}}}(undef, n_runs)
+    mean_colony_cover_m2 = _mean_colony_cover_m2()
 
     # Run simulations in parallel. Each run gets an independent reef copy.
     @threads for run_id in 1:n_runs
@@ -32,7 +33,7 @@ function simulate_outputs(reef_state, env_conditions, dt, revisit_cadence, deplo
             Kora.reset!(local_reef_state)
             # Convert target cover fraction -> colony count using expected m² per colony
             target_cover_m2 = init_cover_fraction * maximum(local_reef_state.carrying_capacity)
-            target_pop = max(5, ceil(Int64, target_cover_m2 / MEAN_COLONY_COVER_M2))
+            target_pop = max(5, ceil(Int64, target_cover_m2 / mean_colony_cover_m2))
             initialize_coral_population!(
                 local_reef_state,
                 1,

@@ -78,8 +78,6 @@ function reset_baseline_plots!(ax1, ax2, outputs, run_color, cover_traces, group
     fade_out_traces!(cover_traces, group_traces)
     empty!(ax1)
     autolimits!(ax1)
-    empty!(ax2)
-    autolimits!(ax2)
 
     new_cover_traces = plot_covers!(ax1, outputs.covers, run_color)
     new_group_traces = plot_group_trajectories!(ax2, ensemble_group_summary(outputs.group_covers))

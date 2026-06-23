@@ -26,8 +26,6 @@ const MAX_REEF_AREA_M2 = 500.0
 include("sim_helpers.jl")
 include("plot_helpers.jl")
 
-const MEAN_COLONY_COVER_M2 = _mean_colony_cover_m2()
-
 const GROUP_LABELS = if isdefined(Kora, :GROUP_NAMES)
     collect(getproperty(Kora, :GROUP_NAMES))
 else
@@ -193,15 +191,18 @@ function create_dashboard()
             plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
         )
 
-        Legend(
-            fig[3, 1],
-            ax2;
-            orientation=:horizontal,
-            tellwidth=false,
-            tellheight=true,
-            halign=:center,
-            valign=:center
-        )
+        let _colors = Makie.wong_colors()
+            Legend(
+                fig[3, 1],
+                [LineElement(color=_colors[mod1(i, length(_colors))], linewidth=2) for i in 1:length(GROUP_LABELS)],
+                collect(GROUP_LABELS);
+                orientation=:horizontal,
+                tellwidth=false,
+                tellheight=true,
+                halign=:center,
+                valign=:center
+            )
+        end
 
         lines!(ax3, mean(env_conditions[:, :, At(:dhw)].data; dims=2)[:])
 
