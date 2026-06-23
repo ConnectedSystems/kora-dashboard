@@ -22,5 +22,5 @@ Place required data into the `data` directory.
 To launch:
 
 ```julia
-include("bin/main.jl")
+include("bin/launch.jl")
 ```
