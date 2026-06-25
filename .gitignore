@@ -4,6 +4,7 @@
 
 /data/*
 
-build/
+build/kora_app/*
+build/kora_app.zip
 
 *.a
