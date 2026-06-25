@@ -165,12 +165,12 @@ function create_dashboard()
             xlabel="Timestep",
             ylabel="Cover [m²]"
         )
-        ax2 = Axis(fig[2, 1];
+        ax2 = Axis(fig[3, 1];
             title="Cover by Functional Group",
             xlabel="Timestep",
             ylabel="Cover [m²]"
         )
-        ax3 = Axis(fig[4, 1];
+        ax3 = Axis(fig[5, 1];
             title="Heat Stress [DHW]",
             xlabel="Timestep",
             ylabel="Degree Heating Weeks"
@@ -187,13 +187,23 @@ function create_dashboard()
             init_cover_fraction=Float32(init_cover_pct.value[]) / 100f0
         ))
         cover_traces_ref = Ref(plot_covers!(ax1, initial_outputs_ref[].covers, INITIAL_RUN_COLOR))
+        Legend(
+            fig[2, 1],
+            [LineElement(color=INITIAL_RUN_COLOR, linewidth=2)],
+            ["Baseline (no deployment)"];
+            orientation=:horizontal,
+            tellwidth=false,
+            tellheight=true,
+            halign=:center,
+            valign=:center
+        )
         group_traces_ref = Ref(
             plot_group_trajectories!(ax2, ensemble_group_summary(initial_outputs_ref[].group_covers))
         )
 
         let _colors = Makie.wong_colors()
             Legend(
-                fig[3, 1],
+                fig[4, 1],
                 [LineElement(color=_colors[mod1(i, length(_colors))], linewidth=2) for i in 1:length(GROUP_LABELS)],
                 collect(GROUP_LABELS);
                 orientation=:horizontal,
@@ -205,6 +215,11 @@ function create_dashboard()
         end
 
         lines!(ax3, mean(env_conditions[:, :, At(:dhw)].data; dims=2)[:])
+
+        deploy_vline_x = map(v -> [Float64(v)], deploy_time)
+        for ax in (ax1, ax2, ax3)
+            vlines!(ax, deploy_vline_x; color=(:black, 0.6), linewidth=2)
+        end
 
         last_init_cover_pct = Ref(Int(init_cover_pct.value[]))
         run_click_count = Ref(1)
@@ -251,6 +266,9 @@ function create_dashboard()
                 )
                 cover_traces_ref[] = baseline_traces.cover_traces
                 group_traces_ref[] = baseline_traces.group_traces
+                for ax in (ax1, ax2)
+                    vlines!(ax, deploy_vline_x; color=(:black, 0.6), linewidth=2)
+                end
                 run_status_text[] = "Reset complete"
                 run_status_class[] = "run-status completed"
             end
@@ -310,6 +328,9 @@ function create_dashboard()
             )
             cover_traces_ref[] = baseline_traces.cover_traces
             group_traces_ref[] = baseline_traces.group_traces
+            for ax in (ax1, ax2)
+                vlines!(ax, deploy_vline_x; color=(:black, 0.6), linewidth=2)
+            end
             ax1.title[] = "Coral Cover Over Time\nReef Area: $(area_val)m²"
             run_status_text[] = "Reset complete"
             run_status_class[] = "run-status completed"
@@ -403,6 +424,9 @@ function create_dashboard()
                         )
                         cover_traces_ref[] = baseline_traces.cover_traces
                         group_traces_ref[] = baseline_traces.group_traces
+                        for ax in (ax1, ax2)
+                            vlines!(ax, deploy_vline_x; color=(:black, 0.6), linewidth=2)
+                        end
                     end
                     if !no_deployments
                         outputs = simulate_outputs(
@@ -422,6 +446,7 @@ function create_dashboard()
                             ax2,
                             ensemble_group_summary(outputs.group_covers)
                         )
+                        vlines!(ax2, deploy_vline_x; color=(:black, 0.6), linewidth=2)
                     end
                 finally
                     elapsed_s = round(time() - started_at; digits=2)
@@ -464,7 +489,7 @@ function create_dashboard()
                         ),
                         DOM.div(
                             DOM.span("Mean density: "; class="info-label"),
-                            DOM.span(map(v -> "$(v) per m²", mean_density_obs); class="info-value")
+                            DOM.span(map(v -> "$(v) / m²", mean_density_obs); class="info-value")
                         );
                         class="info-panel"
                     ),
@@ -477,7 +502,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                dtv -> "Deployed tabular Acropora per year [$(dtv)]:",
+                                dtv -> "tabular Acropora / year [$(dtv)]:",
                                 tabular_volume
                             );
                             class="control-label"
@@ -487,7 +512,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                dcv -> "Deployed corymbose Acropora per year [$(dcv)]:",
+                                dcv -> "corymbose Acropora / year [$(dcv)]:",
                                 corymbose_volume
                             );
                             class="control-label"
@@ -497,7 +522,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                dnav -> "Deployed branching non-Acropora per year [$(dnav)]:",
+                                dnav -> "branching non-Acropora / year [$(dnav)]:",
                                 non_acro_corymbose_volume
                             );
                             class="control-label"
@@ -507,7 +532,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                smv -> "Deployed small massives per year [$(smv)]:",
+                                smv -> "small massives / year [$(smv)]:",
                                 massive_volume
                             );
                             class="control-label"
@@ -517,7 +542,7 @@ function create_dashboard()
                     DOM.div(
                         DOM.label(
                             map(
-                                lmv -> "Deployed large massives per year [$(lmv)]:",
+                                lmv -> "large massives / year [$(lmv)]:",
                                 large_massive_volume
                             );
                             class="control-label"

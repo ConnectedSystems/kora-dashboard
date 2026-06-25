@@ -3,19 +3,24 @@ function color_for_click(click::Int)
     return palette[mod1(click, length(palette))]
 end
 
-function plot_covers!(ax1, covers, run_color; alpha=0.35)
+function plot_covers!(ax1, covers, run_color; alpha=0.35, label=nothing)
     traces = Vector{NamedTuple{(:plot, :alpha, :base_alpha),Tuple{Any,Observable{Float64},Float64}}}()
+    pending_label = label
 
     for cover in covers
         if isnothing(cover)
             continue
         end
         alpha_obs = Observable(alpha)
-        plot_obj = lines!(ax1, cover; alpha=alpha_obs, color=run_color)
+        if !isnothing(pending_label)
+            plot_obj = lines!(ax1, cover; alpha=alpha_obs, color=run_color, label=pending_label)
+            pending_label = nothing
+        else
+            plot_obj = lines!(ax1, cover; alpha=alpha_obs, color=run_color)
+        end
         push!(traces, (plot=plot_obj, alpha=alpha_obs, base_alpha=Float64(alpha)))
     end
 
-    # Ensure axis limits update to include newly drawn traces.
     autolimits!(ax1)
 
     return traces
