@@ -2,7 +2,10 @@ using DotEnv
 
 include(joinpath(@__DIR__, "..", "src", "main.jl"))
 
-function @main(ARGS)
+"""
+Separate entry point for Julia v1.11
+"""
+function _main()
     local_env_file = joinpath(@__DIR__, "..", ".env.local")
     if isfile(local_env_file)
         DotEnv.load!(local_env_file)
@@ -63,7 +66,16 @@ function @main(ARGS)
     # if (a) the server closes, or (b) the app itself times out and is killed externally.
     wait(server)
 
-    return 0
+    return Cint(0)
+end
+
+
+@static if VERSION >= v"1.12"
+    include(joinpath(@__DIR__, "entrypoint_v112.jl"))
+else
+    function julia_main()::Cint
+        _main()
+    end
 end
 
 # juliac \
