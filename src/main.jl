@@ -11,7 +11,12 @@ using Kora
 import Bonito.TailwindDashboard as D
 import Kora: load_models, process_ecorrap_models
 
-const DATA_DIR = joinpath(@__DIR__, "..", "data")
+const _APP_ROOT = let
+    baked = normpath(joinpath(@__DIR__, ".."))
+    isdir(joinpath(baked, "data")) ? baked : normpath(joinpath(dirname(Sys.executable()), ".."))
+end
+
+const DATA_DIR = joinpath(_APP_ROOT, "data")
 const ECORRAP_FILE = joinpath(DATA_DIR, "ecorrap_expanded.parquet")
 const FG_FILE = joinpath(DATA_DIR, "ecorrap_to_cscape_species.csv")
 const OUTPUT_DIR = joinpath(DATA_DIR, "models")
@@ -22,6 +27,8 @@ const BASE_SEED = 148
 const INITIAL_RUN_COLOR = :gray55
 const MIN_REEF_AREA_M2 = 30.0
 const MAX_REEF_AREA_M2 = 500.0
+
+const PKG_VERS = string(pkgversion(Kora))
 
 include("sim_helpers.jl")
 include("plot_helpers.jl")
@@ -62,7 +69,7 @@ else
 end
 
 function create_dashboard()
-    dhw_datasets = joinpath(@__DIR__, "..", "data", "DHWs")
+    dhw_datasets = joinpath(DATA_DIR, "DHWs")
     dhw45 = NCDataset(joinpath(dhw_datasets, "dhwRCP45.nc"))
     target_site = "Moore_16071_Slope_66"
     target_col = first(findall(dhw45["reef_siteid"][:] .== target_site))
@@ -70,10 +77,10 @@ function create_dashboard()
     n_years = length(dhw_seq)
 
     # Add CSS
-    styling = Bonito.Asset(joinpath(@__DIR__, "..", "assets", "db_display.css"))
+    styling = Bonito.Asset(joinpath(_APP_ROOT, "assets", "db_display.css"))
 
     # Create the app
-    app = App(; title="Kora") do
+    app = App(; title="Kora $(PKG_VERS)") do
         # Model parameters
         n_locs = 1
 
