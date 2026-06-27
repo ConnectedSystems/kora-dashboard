@@ -2,7 +2,9 @@
 # sh ./build/build.sh
 
 rm -rf build/kora_app
+rm -f build/kora_app.tar.gz
 
+JULIA_CPU_TARGET="generic;sandybridge,-xsaveopt,clone_all;znver2,-xsaveopt,clone_all" \
 time juliac \
   --output-exe kora_app \
   --bundle build/kora_app \
@@ -27,8 +29,5 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 EOF
 chmod +x build/kora_app/launch.sh
 
-cat > build/kora_app/launch.ps1 << 'EOF'
-& "$PSScriptRoot\bin\kora_app.exe"
-EOF
 
 tar -czf build/kora_app.tar.gz -C build kora_app

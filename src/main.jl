@@ -12,8 +12,9 @@ import Bonito.TailwindDashboard as D
 import Kora: load_models, process_ecorrap_models
 
 const _APP_ROOT = let
-    baked = normpath(joinpath(@__DIR__, ".."))
-    isdir(joinpath(baked, "data")) ? baked : normpath(joinpath(dirname(Sys.executable()), ".."))
+    exe_based = normpath(joinpath(Sys.BINDIR, ".."))
+    src_based = normpath(joinpath(@__DIR__, ".."))
+    isdir(joinpath(exe_based, "data")) ? exe_based : src_based
 end
 
 const DATA_DIR = joinpath(_APP_ROOT, "data")

@@ -3,7 +3,9 @@
 
 Measure-Command {
 Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build/kora_app
+Remove-Item -Force -ErrorAction SilentlyContinue build/kora_app.zip
 
+$env:JULIA_CPU_TARGET = "generic;sandybridge,-xsaveopt,clone_all;znver2,-xsaveopt,clone_all"
 juliac `
   --output-exe kora_app `
   --bundle build/kora_app `
@@ -21,10 +23,11 @@ Copy-Item -Recurse -Force assets build\kora_app\assets
 Copy-Item build/README.md build/kora_app/README.md
 Copy-Item LICENSE build/kora_app/LICENSE
 
-# Create launch script
+# Create launch script (batch file so users can double-click it)
 @'
-& "$PSScriptRoot\bin\kora_app.exe"
-'@ | Set-Content -Path build\kora_app\launch.ps1 -Encoding UTF8
+@echo off
+"%~dp0bin\kora_app.exe"
+'@ | Set-Content -Path build\kora_app\launch.bat -Encoding ASCII
 
 Compress-Archive -Path build\kora_app -DestinationPath build\kora_app.zip
 }

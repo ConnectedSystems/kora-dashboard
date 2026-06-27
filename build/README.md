@@ -7,16 +7,17 @@ Offshore North region, not any specific reef.
 
 Unzip the files into a location of your choice.
 
-Navigate to the folder and double click on the launch script for your system (`.ps1` for
+Navigate to the folder and double click on the launch script for your system (`.bat` for
 Windows, `.sh` for linux).
 
 It should launch the app in a web browser (but the program runs locally, on your machine).
+The first time use will take a little bit of time to launch.
 
 ## Notes
 
-The model is initialized with all coral groups contributing proportionally equal cover
-For example, if the assumed initial cover is 30%, each of the five coral groups will
-contribute 1/5th towards that 30%.
+For example purposes, the model is initialized with all coral groups contributing
+proportionally equal cover. If the assumed initial cover is set to 30%, each of the five
+coral groups will contribute 1/5th towards that 30%.
 
 Each click of the "run" button will produce an ensemble of 25 evaluations of the Kora model,
 allowing some indication of potential model projection uncertainty.
