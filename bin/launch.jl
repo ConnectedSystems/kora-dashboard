@@ -1,3 +1,3 @@
 include(joinpath(@__DIR__, "main.jl"))
 
-_main()
+_main(ARGS)

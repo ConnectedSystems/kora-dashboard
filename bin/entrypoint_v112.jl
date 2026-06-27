@@ -2,5 +2,5 @@
 Entry point for Julia v1.12+
 """
 function @main(ARGS)
-    _main()
+    _main(ARGS)
 end

@@ -5,7 +5,7 @@ include(joinpath(@__DIR__, "..", "src", "main.jl"))
 """
 Separate entry point for Julia v1.11
 """
-function _main()
+function _main(args)
     local_env_file = joinpath(@__DIR__, "..", ".env.local")
     if isfile(local_env_file)
         DotEnv.load!(local_env_file)
@@ -48,17 +48,20 @@ function _main()
 
     # Display URL
     url_to_visit = online_url(server, "/")
-    @info "Website launched at: $(url_to_visit)"
+    @info "Kora dashboard launched at: $(url_to_visit)"
 
     @info server
 
     # Open in default browser
-    if Sys.iswindows()
-        run(`cmd /c start $url_to_visit`)
-    elseif Sys.isapple()
-        run(`open $url_to_visit`)
-    else  # Linux
-        run(`xdg-open $url_to_visit`)
+    server_mode = "--mode=server" in args
+    if !server_mode
+        if Sys.iswindows()
+            run(`cmd /c start $url_to_visit`)
+        elseif Sys.isapple()
+            run(`open $url_to_visit`)
+        else  # Linux
+            run(`xdg-open $url_to_visit`)
+        end
     end
 
     # Wait for the server to exit, because if running in an app, the app will
@@ -74,7 +77,7 @@ end
     include(joinpath(@__DIR__, "entrypoint_v112.jl"))
 else
     function julia_main()::Cint
-        _main()
+        _main(ARGS)
     end
 end
 
