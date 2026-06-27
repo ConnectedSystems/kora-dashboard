@@ -7,7 +7,8 @@ Offshore North region, not any specific reef.
 
 Unzip the files into a location of your choice.
 
-Navigate to the `bin` folder and double click on `kora_app.exe`.
+Navigate to the folder and double click on the launch script for your system (`.ps1` for
+Windows, `.sh` for linux).
 
 It should launch the app in a web browser (but the program runs locally, on your machine).
 

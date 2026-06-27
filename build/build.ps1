@@ -21,5 +21,10 @@ Copy-Item -Recurse -Force assets build\kora_app\assets
 Copy-Item build/README.md build/kora_app/README.md
 Copy-Item LICENSE build/kora_app/LICENSE
 
-Compress-Archive -Path build\kora_app -DestinationPath kora_app.zip
+# Create launch script
+@'
+& "$PSScriptRoot\bin\kora_app.exe"
+'@ | Set-Content -Path build\kora_app\launch.ps1 -Encoding UTF8
+
+Compress-Archive -Path build\kora_app -DestinationPath build\kora_app.zip
 }

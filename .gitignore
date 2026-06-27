@@ -6,5 +6,6 @@
 
 build/kora_app/*
 build/kora_app.zip
+build/kora_app.tar.gz
 
 *.a
